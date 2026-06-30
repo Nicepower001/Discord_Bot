@@ -143,11 +143,13 @@ def check_steam(state):
         previous = state["steam"].get(app_id)
 
         if previous is None:
+            state["steam"][app_id] = current
             previous = {"is_free": False, "discount_percent": 0, "final": None}
 
-        became_free = (not previous.get("is_free")) and current["is_free"]
-        discount_changed = previous.get("discount_percent") != current["discount_percent"]
-        price_changed = previous.get("final") != current["final"]
+        became_free = (not previous["is_free"]) and current["is_free"]
+        discount_started = (previous["discount_percent"] == 0 and current["discount_percent"] > 0)
+        discount_changed = (previous["discount_percent"] != current["discount_percent"])
+        price_back_to_normal = (previous["discount_percent"] > 0 and current["discount_percent"] == 0)
 
         embed = None
         content = None
