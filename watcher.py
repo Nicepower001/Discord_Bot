@@ -24,6 +24,12 @@ STEAM_STORE_API = "https://store.steampowered.com/api/appdetails"
 MESSAGE_QUEUE = []
 SESSION = requests.Session()
 
+try:
+    from zoneinfo import ZoneInfo
+    BERLIN_TZ = ZoneInfo("Europe/Berlin")
+except Exception:
+    BERLIN_TZ = None
+
 
 def load_state():
     if STATE_FILE.exists():
@@ -162,8 +168,12 @@ def format_end_date(timestamp):
         return "Ende: Unbekannt"
 
     try:
-        dt = datetime.utcfromtimestamp(timestamp)
-        return dt.strftime("%H:%M / %d.%m.%Y")
+        if BERLIN_TZ:
+            dt = datetime.fromtimestamp(timestamp, tz=BERLIN_TZ)
+            return dt.strftime("%H:%M / %d.%m.%Y %Z")
+        else:
+            dt = datetime.utcfromtimestamp(timestamp)
+            return dt.strftime("%H:%M / %d.%m.%Y UTC")
     except Exception:
         return "Ende: Unbekannt"
 
@@ -174,11 +184,24 @@ def format_youtube_date(published):
 
     try:
         dt = parsedate_to_datetime(published)
-        return dt.strftime("%H:%M / %d.%m.%Y")
+        if BERLIN_TZ:
+            if dt.tzinfo is None:
+                # assume UTC if no tz provided
+                dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+            dt = dt.astimezone(BERLIN_TZ)
+            return dt.strftime("%H:%M / %d.%m.%Y %Z")
+        else:
+            return dt.strftime("%H:%M / %d.%m.%Y")
     except Exception:
         try:
             dt = datetime.fromisoformat(published.replace("Z", "+00:00"))
-            return dt.strftime("%H:%M / %d.%m.%Y")
+            if BERLIN_TZ:
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+                dt = dt.astimezone(BERLIN_TZ)
+                return dt.strftime("%H:%M / %d.%m.%Y %Z")
+            else:
+                return dt.strftime("%H:%M / %d.%m.%Y")
         except Exception:
             return published
 
@@ -317,7 +340,11 @@ def check_steam(state):
 
 
 def queue_final_message():
-    now_text = datetime.utcnow().strftime("%d.%m.%Y %H:%M:%S UTC")
+    if BERLIN_TZ:
+        now_text = datetime.now(BERLIN_TZ).strftime("%d.%m.%Y %H:%M:%S %Z")
+    else:
+        now_text = datetime.utcnow().strftime("%d.%m.%Y %H:%M:%S UTC")
+
     embed = {
         "title": "----------- THIS IS EVERYTHING -----------",
         "description": now_text,
