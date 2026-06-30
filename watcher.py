@@ -1,7 +1,9 @@
 import json
 import os
+import time
 from pathlib import Path
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import feedparser
 import requests
@@ -18,6 +20,8 @@ STEAM_APP_IDS = [
 ]
 
 STEAM_STORE_API = "https://store.steampowered.com/api/appdetails"
+MESSAGE_QUEUE = []
+SESSION = requests.Session()
 
 
 def load_state():
@@ -30,60 +34,100 @@ def save_state(state):
     STATE_FILE.write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
-def send_discord(content, embed=None):
-    payload = {"content": content}
-    if embed:
-        payload["embeds"] = [embed]
+def queue_discord(content, embed=None):
+    MESSAGE_QUEUE.append({"content": content, "embed": embed})
 
-    r = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=20)
-    r.raise_for_status()
+
+def flush_queue():
+    for msg in MESSAGE_QUEUE:
+        payload = {"content": msg["content"]}
+        if msg["embed"]:
+            payload["embeds"] = [msg["embed"]]
+
+        while True:
+            r = SESSION.post(DISCORD_WEBHOOK_URL, json=payload, timeout=30)
+
+            if r.status_code in (200, 204):
+                break
+
+            if r.status_code == 429:
+                retry_after = 1
+                try:
+                    data = r.json()
+                    retry_after = data.get("retry_after", 1)
+                    if retry_after > 50:
+                        retry_after = retry_after / 1000.0
+                except Exception:
+                    retry_after = 1
+                time.sleep(retry_after)
+                continue
+
+            r.raise_for_status()
+
+        time.sleep(0.35)
+
+
+def fetch_youtube_latest(channel_id):
+    feed_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+    feed = feedparser.parse(feed_url)
+
+    if not feed.entries:
+        return channel_id, None
+
+    latest = feed.entries[0]
+    video_id = latest.get("yt_videoid") or latest.get("videoid")
+    title = latest.get("title", "New upload")
+    url = latest.get("link")
+    author = latest.get("author", channel_id)
+    published = latest.get("published", "")
+    thumbnail = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if video_id else None
+
+    return channel_id, {
+        "video_id": video_id,
+        "title": title,
+        "url": url,
+        "author": author,
+        "published": published,
+        "thumbnail": thumbnail
+    }
 
 
 def check_youtube(state):
     changed = False
 
-    for channel_id in YOUTUBE_CHANNEL_IDS:
-        feed_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
-        feed = feedparser.parse(feed_url)
+    max_workers = min(24, max(1, len(YOUTUBE_CHANNEL_IDS)))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(fetch_youtube_latest, channel_id) for channel_id in YOUTUBE_CHANNEL_IDS]
 
-        if not feed.entries:
-            continue
+        for future in as_completed(futures):
+            channel_id, latest = future.result()
+            if not latest or not latest["video_id"]:
+                continue
 
-        latest = feed.entries[0]
+            last_seen = state["youtube"].get(channel_id)
 
-        video_id = latest.get("yt_videoid") or latest.get("videoid")
-        title = latest.get("title", "New upload")
-        url = latest.get("link")
-        author = latest.get("author", channel_id)
-        published = latest.get("published", "")
+            if last_seen != latest["video_id"]:
+                embed = {
+                    "title": f"{latest['author']} posted a new video",
+                    "url": latest["url"],
+                    "description": f"**{latest['title']}**\n\n{latest['published']}",
+                    "color": 0xFF0000,
+                    "thumbnail": {"url": latest["thumbnail"]} if latest["thumbnail"] else None
+                }
 
-        last_seen = state["youtube"].get(channel_id)
+                queue_discord("A new Video is live on Youtube", embed)
 
-        if last_seen != video_id:
-            thumbnail = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
-
-            embed = {
-                "title": f"{author} posted a new video",
-                "url": url,
-                "description": f"**{title}**\n\n{published}",
-                "color": 0xFF0000,
-                "thumbnail": {"url": thumbnail},
-            }
-
-            send_discord("A new Video is live on Youtube", embed)
-
-            state["youtube"][channel_id] = video_id
-            changed = True
+                state["youtube"][channel_id] = latest["video_id"]
+                changed = True
 
     return changed
 
 
-
 def fetch_steam_details(app_id):
-    r = requests.get(
+    r = SESSION.get(
         STEAM_STORE_API,
         params={"appids": app_id, "cc": "de", "l": "en"},
-        timeout=20
+        timeout=30
     )
     r.raise_for_status()
     data = r.json().get(str(app_id), {})
@@ -92,12 +136,11 @@ def fetch_steam_details(app_id):
         return None
 
     details = data.get("data", {})
-
     discount_end = None
 
     if "price_overview" in details:
         pov = details["price_overview"]
-        discount_end = pov.get("discount_expiration")  # VERY rare
+        discount_end = pov.get("discount_expiration")
 
     details["_discount_end"] = discount_end
     return details
@@ -106,7 +149,10 @@ def fetch_steam_details(app_id):
 def format_price(cents, currency):
     if cents is None:
         return "N/A"
-    return f"{cents/100:.2f} {currency}"
+    if not currency:
+        return f"{cents / 100:.2f}"
+    return f"{cents / 100:.2f} {currency}"
+
 
 def format_end_date(timestamp):
     if not timestamp:
@@ -115,7 +161,7 @@ def format_end_date(timestamp):
     try:
         dt = datetime.utcfromtimestamp(timestamp)
         return dt.strftime("Ends: %d.%m.%Y %H:%M UTC")
-    except:
+    except Exception:
         return "Ends: Unknown"
 
 
@@ -156,7 +202,7 @@ def check_steam(state):
                     "url": current["url"],
                     "description": f"~~{original_price}~~ → **FREE**",
                     "color": 0x00FF00,
-                    "thumbnail": {"url": current["image"]},
+                    "thumbnail": {"url": current["image"]} if current["image"] else None,
                     "footer": {"text": footer_text}
                 }
 
@@ -169,36 +215,23 @@ def check_steam(state):
                 embed = {
                     "title": f"{current['name']} is on SALE",
                     "url": current["url"],
-                    "description": (
-                        f"**-{current['discount_percent']}%**\n\n"
-                        f"~~{original}~~ → **{new}**"
-                    ),
+                    "description": f"**-{current['discount_percent']}%**\n\n~~{original}~~ → **{new}**",
                     "color": 0xFFFF00,
-                    "thumbnail": {"url": current["image"]},
+                    "thumbnail": {"url": current["image"]} if current["image"] else None,
                     "footer": {"text": footer_text}
                 }
 
             if embed:
-                send_discord(content or "", embed)
+                queue_discord(content or "", embed)
 
             state["steam"][app_id] = current
             changed = True
             continue
 
         became_free = (not previous["is_free"]) and current["is_free"]
-
-        discount_started = (
-                previous["discount_percent"] == 0 and current["discount_percent"] > 0
-        )
-
-        discount_changed = (
-                previous["discount_percent"] != current["discount_percent"]
-                and current["discount_percent"] > 0
-        )
-
-        price_back_to_normal = (
-                previous["discount_percent"] > 0 and current["discount_percent"] == 0
-        )
+        discount_started = previous["discount_percent"] == 0 and current["discount_percent"] > 0
+        discount_changed = previous["discount_percent"] != current["discount_percent"] and current["discount_percent"] > 0
+        price_back_to_normal = previous["discount_percent"] > 0 and current["discount_percent"] == 0
 
         embed = None
         content = None
@@ -213,7 +246,7 @@ def check_steam(state):
                 "url": current["url"],
                 "description": f"~~{original_price}~~ → **FREE**",
                 "color": 0x00FF00,
-                "thumbnail": {"url": current["image"]},
+                "thumbnail": {"url": current["image"]} if current["image"] else None,
                 "footer": {"text": footer_text}
             }
 
@@ -226,12 +259,9 @@ def check_steam(state):
             embed = {
                 "title": f"{current['name']} is on SALE",
                 "url": current["url"],
-                "description": (
-                    f"**-{current['discount_percent']}%**\n\n"
-                    f"~~{original}~~ → **{new}**"
-                ),
+                "description": f"**-{current['discount_percent']}%**\n\n~~{original}~~ → **{new}**",
                 "color": 0xFFFF00,
-                "thumbnail": {"url": current["image"]},
+                "thumbnail": {"url": current["image"]} if current["image"] else None,
                 "footer": {"text": footer_text}
             }
 
@@ -244,11 +274,11 @@ def check_steam(state):
                 "url": current["url"],
                 "description": f"Now costs **{original}**",
                 "color": 0xFF0000,
-                "thumbnail": {"url": current["image"]}
+                "thumbnail": {"url": current["image"]} if current["image"] else None
             }
 
         if embed:
-            send_discord(content or "", embed)
+            queue_discord(content or "", embed)
             state["steam"][app_id] = current
             changed = True
         else:
@@ -265,6 +295,8 @@ def main():
 
     if yt_changed or steam_changed:
         save_state(state)
+
+    flush_queue()
 
 
 if __name__ == "__main__":
