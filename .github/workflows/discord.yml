@@ -27,8 +27,8 @@ jobs:
       - name: Run watcher
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          YOUTUBE_CHANNEL_IDS: ${{ secrets.YOUTUBE_CHANNEL_IDS }}
-          STEAM_APP_IDS: ${{ secrets.STEAM_APP_IDS }}
+          YOUTUBE_CHANNEL_IDS: ${{ vars.YOUTUBE_CHANNEL_IDS }}
+          STEAM_APP_IDS: ${{ vars.STEAM_APP_IDS }}
         run: python watcher.py
 
       - name: Commit updated state
