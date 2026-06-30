@@ -1,4 +1,24 @@
 {
-  "youtube": {},
-  "steam": {}
+  "youtube": {
+    "UCgZpwegd4AdDlZNrIamIgRw": "i9ESJNFZ4EM",
+    "UCX6OQ3DkcsbYNE6H8uQQuVA": "iYlODtkyw_I"
+  },
+  "steam": {
+    "2680010": {
+      "name": "The First Berserker: Khazan",
+      "is_free": false,
+      "discount_percent": 40,
+      "final": 3599,
+      "currency": "EUR",
+      "url": "https://store.steampowered.com/app/2680010/"
+    },
+    "2225960": {
+      "name": "Noobs Are Coming",
+      "is_free": false,
+      "discount_percent": 40,
+      "final": 467,
+      "currency": "EUR",
+      "url": "https://store.steampowered.com/app/2225960/"
+    }
+  }
 }
