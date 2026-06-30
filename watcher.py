@@ -65,12 +65,12 @@ def check_youtube(state):
             embed = {
                 "title": f"{author} posted a new video",
                 "url": url,
-                "description": f"**{title}**\n\n📅 {published}",
+                "description": f"**{title}**\n\n{published}",
                 "color": 0xFF0000,
                 "thumbnail": {"url": thumbnail},
             }
 
-            send_discord("📺 YouTube", embed)
+            send_discord("A new Video is live on Youtube", embed)
 
             state["youtube"][channel_id] = video_id
             changed = True
@@ -155,7 +155,7 @@ def check_steam(state):
         if current["is_free"]:
             original_price = format_price(previous.get("final"), current["currency"])
 
-            content = "@everyone 🎮"
+            content = "A whishlisted Game is now FREE! @everyone"
 
             footer_text = format_end_date(details.get("_discount_end"))
 
@@ -186,7 +186,7 @@ def check_steam(state):
                 "footer": {"text": footer_text}
             }
 
-            content = "🎮"
+            content = "Steam Sale"
 
         elif previous.get("discount_percent", 0) > 0:
             original = format_price(current["final"], current["currency"])
@@ -199,7 +199,7 @@ def check_steam(state):
                 "thumbnail": {"url": current["image"]}
             }
 
-            content = "🎮"
+            content = "Steam Price Update"
 
         if embed:
             send_discord(content or "", embed)
