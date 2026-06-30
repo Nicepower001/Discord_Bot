@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+from datetime import datetime
 
 import feedparser
 import requests
@@ -49,33 +50,33 @@ def check_youtube(state):
             continue
 
         latest = feed.entries[0]
+
         video_id = latest.get("yt_videoid") or latest.get("videoid")
         title = latest.get("title", "New upload")
         url = latest.get("link")
         author = latest.get("author", channel_id)
+        published = latest.get("published", "")
 
         last_seen = state["youtube"].get(channel_id)
 
-        # First run: store current latest, don't send old videos
-        if last_seen is None:
-            state["youtube"][channel_id] = video_id
-            changed = True
-            continue
+        if last_seen != video_id:
+            thumbnail = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
 
-        if video_id and video_id != last_seen:
-            send_discord(
-                f"📺 **New upload by {author}**\n{url}",
-                {
-                    "title": title,
-                    "url": url,
-                    "description": f"New YouTube upload from **{author}**",
-                    "color": 16711680
-                }
-            )
+            embed = {
+                "title": f"{author} posted a new video",
+                "url": url,
+                "description": f"**{title}**\n\n📅 {published}",
+                "color": 0xFF0000,
+                "thumbnail": {"url": thumbnail},
+            }
+
+            send_discord("📺 YouTube", embed)
+
             state["youtube"][channel_id] = video_id
             changed = True
 
     return changed
+
 
 
 def fetch_steam_details(app_id):
@@ -86,9 +87,36 @@ def fetch_steam_details(app_id):
     )
     r.raise_for_status()
     data = r.json().get(str(app_id), {})
+
     if not data.get("success"):
         return None
-    return data.get("data", {})
+
+    details = data.get("data", {})
+
+    discount_end = None
+
+    if "price_overview" in details:
+        pov = details["price_overview"]
+        discount_end = pov.get("discount_expiration")  # VERY rare
+
+    details["_discount_end"] = discount_end
+    return details
+
+
+def format_price(cents, currency):
+    if cents is None:
+        return "N/A"
+    return f"{cents/100:.2f} {currency}"
+
+def format_end_date(timestamp):
+    if not timestamp:
+        return "Ends: Unknown"
+
+    try:
+        dt = datetime.utcfromtimestamp(timestamp)
+        return dt.strftime("Ends: %d.%m.%Y %H:%M UTC")
+    except:
+        return "Ends: Unknown"
 
 
 def check_steam(state):
@@ -100,52 +128,81 @@ def check_steam(state):
             continue
 
         price = details.get("price_overview") or {}
+
         current = {
             "name": details.get("name", f"App {app_id}"),
             "is_free": bool(details.get("is_free")),
-            "discount_percent": price.get("discount_percent"),
+            "discount_percent": price.get("discount_percent") or 0,
+            "initial": price.get("initial"),
             "final": price.get("final"),
             "currency": price.get("currency"),
-            "url": f"https://store.steampowered.com/app/{app_id}/"
+            "url": f"https://store.steampowered.com/app/{app_id}/",
+            "image": details.get("header_image")
         }
 
         previous = state["steam"].get(app_id)
 
-        # First run: store current state, don't send old deals
         if previous is None:
-            state["steam"][app_id] = current
-            changed = True
-            continue
+            previous = {"is_free": False, "discount_percent": 0, "final": None}
 
-        became_free = (not previous.get("is_free")) and current.get("is_free")
-        discount_changed = previous.get("discount_percent") != current.get("discount_percent")
-        final_changed = previous.get("final") != current.get("final")
+        became_free = (not previous.get("is_free")) and current["is_free"]
+        discount_changed = previous.get("discount_percent") != current["discount_percent"]
+        price_changed = previous.get("final") != current["final"]
 
-        if became_free or discount_changed or final_changed:
-            if current["is_free"]:
-                content = f"🎮 **Steam update: {current['name']}**\nNow **free** on Steam!\n{current['url']}"
-                description = "This game is now free on Steam."
-            else:
-                content = (
-                    f"🎮 **Steam update: {current['name']}**\n"
-                    f"Discount: **-{current.get('discount_percent', 0)}%**\n"
-                    f"{current['url']}"
-                )
-                description = (
-                    f"Current discount: -{current.get('discount_percent', 0)}%\n"
-                    f"Final price: {current.get('final')} {current.get('currency', '')}"
-                )
+        embed = None
+        content = None
 
-            send_discord(
-                content,
-                {
-                    "title": current["name"],
-                    "url": current["url"],
-                    "description": description,
-                    "color": 1774904
-                }
-            )
+        if current["is_free"]:
+            original_price = format_price(previous.get("final"), current["currency"])
 
+            content = "@everyone 🎮"
+
+            footer_text = format_end_date(details.get("_discount_end"))
+
+            embed = {
+                "title": f"{current['name']} is FREE",
+                "url": current["url"],
+                "description": f"~~{original_price}~~ → **FREE**",
+                "color": 0x00FF00,
+                "thumbnail": {"url": current["image"]},
+                "footer": {"text": footer_text}
+            }
+
+        elif current["discount_percent"] > 0:
+            original = format_price(current["initial"], current["currency"])
+            new = format_price(current["final"], current["currency"])
+
+            footer_text = format_end_date(details.get("_discount_end"))
+
+            embed = {
+                "title": f"{current['name']} is on SALE",
+                "url": current["url"],
+                "description": (
+                    f"**-{current['discount_percent']}%**\n\n"
+                    f"~~{original}~~ → **{new}**"
+                ),
+                "color": 0xFFFF00,
+                "thumbnail": {"url": current["image"]},
+                "footer": {"text": footer_text}
+            }
+
+            content = "🎮"
+
+        elif previous.get("discount_percent", 0) > 0:
+            original = format_price(current["final"], current["currency"])
+
+            embed = {
+                "title": f"{current['name']} back to normal price",
+                "url": current["url"],
+                "description": f"Now costs **{original}**",
+                "color": 0xFF0000,
+                "thumbnail": {"url": current["image"]}
+            }
+
+            content = "🎮"
+
+        if embed:
+            send_discord(content or "", embed)
             state["steam"][app_id] = current
             changed = True
 
