@@ -2,8 +2,9 @@ import json
 import os
 import time
 from pathlib import Path
-from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+from email.utils import parsedate_to_datetime
 
 import feedparser
 import requests
@@ -110,7 +111,7 @@ def check_youtube(state):
                 embed = {
                     "title": f"{latest['author']} posted a new video",
                     "url": latest["url"],
-                    "description": f"**{latest['title']}**\n\n{latest['published']}",
+                    "description": f"**{latest['title']}**\n\n{format_youtube_date(latest['published'])}",
                     "color": 0xFF0000
                 }
 
@@ -158,13 +159,29 @@ def format_price(cents, currency):
 
 def format_end_date(timestamp):
     if not timestamp:
-        return "Ends: Unknown"
+        return "Ende: Unbekannt"
 
     try:
         dt = datetime.utcfromtimestamp(timestamp)
-        return dt.strftime("Ends: %d.%m.%Y %H:%M UTC")
+        return dt.strftime("%H:%M / %d.%m.%Y")
     except Exception:
-        return "Ends: Unknown"
+        return "Ende: Unbekannt"
+
+
+def format_youtube_date(published):
+    if not published:
+        return "Unbekannt"
+
+    try:
+        dt = parsedate_to_datetime(published)
+        return dt.strftime("%H:%M / %d.%m.%Y")
+    except Exception:
+        try:
+            dt = datetime.fromisoformat(published.replace("Z", "+00:00"))
+            return dt.strftime("%H:%M / %d.%m.%Y")
+        except Exception:
+            return published
+
 
 
 def check_steam(state):
