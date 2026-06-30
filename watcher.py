@@ -111,9 +111,11 @@ def check_youtube(state):
                     "title": f"{latest['author']} posted a new video",
                     "url": latest["url"],
                     "description": f"**{latest['title']}**\n\n{latest['published']}",
-                    "color": 0xFF0000,
-                    "thumbnail": {"url": latest["thumbnail"]} if latest["thumbnail"] else None
+                    "color": 0xFF0000
                 }
+
+                if latest["thumbnail"]:
+                    embed["thumbnail"] = {"url": latest["thumbnail"]}
 
                 queue_discord("A new Video is live on Youtube", embed)
 
@@ -202,9 +204,11 @@ def check_steam(state):
                     "url": current["url"],
                     "description": f"~~{original_price}~~ → **FREE**",
                     "color": 0x00FF00,
-                    "thumbnail": {"url": current["image"]} if current["image"] else None,
                     "footer": {"text": footer_text}
                 }
+
+                if current["image"]:
+                    embed["thumbnail"] = {"url": current["image"]}
 
             elif current["discount_percent"] > 0:
                 original = format_price(current["initial"], current["currency"])
@@ -217,9 +221,11 @@ def check_steam(state):
                     "url": current["url"],
                     "description": f"**-{current['discount_percent']}%**\n\n~~{original}~~ → **{new}**",
                     "color": 0xFFFF00,
-                    "thumbnail": {"url": current["image"]} if current["image"] else None,
                     "footer": {"text": footer_text}
                 }
+
+                if current["image"]:
+                    embed["thumbnail"] = {"url": current["image"]}
 
             if embed:
                 queue_discord(content or "", embed)
@@ -246,9 +252,11 @@ def check_steam(state):
                 "url": current["url"],
                 "description": f"~~{original_price}~~ → **FREE**",
                 "color": 0x00FF00,
-                "thumbnail": {"url": current["image"]} if current["image"] else None,
                 "footer": {"text": footer_text}
             }
+
+            if current["image"]:
+                embed["thumbnail"] = {"url": current["image"]}
 
         elif discount_started or discount_changed:
             original = format_price(current["initial"], current["currency"])
@@ -261,9 +269,11 @@ def check_steam(state):
                 "url": current["url"],
                 "description": f"**-{current['discount_percent']}%**\n\n~~{original}~~ → **{new}**",
                 "color": 0xFFFF00,
-                "thumbnail": {"url": current["image"]} if current["image"] else None,
                 "footer": {"text": footer_text}
             }
+
+            if current["image"]:
+                embed["thumbnail"] = {"url": current["image"]}
 
         elif price_back_to_normal:
             original = format_price(current["final"], current["currency"])
@@ -273,9 +283,11 @@ def check_steam(state):
                 "title": f"{current['name']} back to normal price",
                 "url": current["url"],
                 "description": f"Now costs **{original}**",
-                "color": 0xFF0000,
-                "thumbnail": {"url": current["image"]} if current["image"] else None
+                "color": 0xFF0000
             }
+
+            if current["image"]:
+                embed["thumbnail"] = {"url": current["image"]}
 
         if embed:
             queue_discord(content or "", embed)
@@ -287,6 +299,16 @@ def check_steam(state):
     return changed
 
 
+def queue_final_message():
+    now_text = datetime.utcnow().strftime("%d.%m.%Y %H:%M:%S UTC")
+    embed = {
+        "title": "----------- THIS IS EVERYTHING -----------",
+        "description": now_text,
+        "color": 0x5865F2
+    }
+    queue_discord("", embed)
+
+
 def main():
     state = load_state()
 
@@ -296,6 +318,7 @@ def main():
     if yt_changed or steam_changed:
         save_state(state)
 
+    queue_final_message()
     flush_queue()
 
 
