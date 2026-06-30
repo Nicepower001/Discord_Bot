@@ -155,6 +155,8 @@ def check_steam(state):
 def main():
     state = load_state()
 
+    send_discord("✅ Watcher is running")
+
     yt_changed = check_youtube(state)
     steam_changed = check_steam(state)
 
