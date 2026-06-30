@@ -143,24 +143,71 @@ def check_steam(state):
         previous = state["steam"].get(app_id)
 
         if previous is None:
+            embed = None
+            content = None
+
+            if current["is_free"]:
+                original_price = format_price(current.get("initial"), current["currency"])
+                footer_text = format_end_date(details.get("_discount_end"))
+
+                content = "A wishlisted game is now FREE! @everyone"
+                embed = {
+                    "title": f"{current['name']} is FREE",
+                    "url": current["url"],
+                    "description": f"~~{original_price}~~ → **FREE**",
+                    "color": 0x00FF00,
+                    "thumbnail": {"url": current["image"]},
+                    "footer": {"text": footer_text}
+                }
+
+            elif current["discount_percent"] > 0:
+                original = format_price(current["initial"], current["currency"])
+                new = format_price(current["final"], current["currency"])
+                footer_text = format_end_date(details.get("_discount_end"))
+
+                content = "Steam Sale"
+                embed = {
+                    "title": f"{current['name']} is on SALE",
+                    "url": current["url"],
+                    "description": (
+                        f"**-{current['discount_percent']}%**\n\n"
+                        f"~~{original}~~ → **{new}**"
+                    ),
+                    "color": 0xFFFF00,
+                    "thumbnail": {"url": current["image"]},
+                    "footer": {"text": footer_text}
+                }
+
+            if embed:
+                send_discord(content or "", embed)
+
             state["steam"][app_id] = current
-            previous = {"is_free": False, "discount_percent": 0, "final": None}
+            changed = True
+            continue
 
         became_free = (not previous["is_free"]) and current["is_free"]
-        discount_started = (previous["discount_percent"] == 0 and current["discount_percent"] > 0)
-        discount_changed = (previous["discount_percent"] != current["discount_percent"])
-        price_back_to_normal = (previous["discount_percent"] > 0 and current["discount_percent"] == 0)
+
+        discount_started = (
+                previous["discount_percent"] == 0 and current["discount_percent"] > 0
+        )
+
+        discount_changed = (
+                previous["discount_percent"] != current["discount_percent"]
+                and current["discount_percent"] > 0
+        )
+
+        price_back_to_normal = (
+                previous["discount_percent"] > 0 and current["discount_percent"] == 0
+        )
 
         embed = None
         content = None
 
-        if current["is_free"]:
-            original_price = format_price(previous.get("final"), current["currency"])
-
-            content = "A whishlisted Game is now FREE! @everyone"
-
+        if became_free:
+            original_price = format_price(previous.get("final") or current.get("initial"), current["currency"])
             footer_text = format_end_date(details.get("_discount_end"))
 
+            content = "A wishlisted game is now FREE! @everyone"
             embed = {
                 "title": f"{current['name']} is FREE",
                 "url": current["url"],
@@ -170,12 +217,12 @@ def check_steam(state):
                 "footer": {"text": footer_text}
             }
 
-        elif current["discount_percent"] > 0:
+        elif discount_started or discount_changed:
             original = format_price(current["initial"], current["currency"])
             new = format_price(current["final"], current["currency"])
-
             footer_text = format_end_date(details.get("_discount_end"))
 
+            content = "Steam Sale"
             embed = {
                 "title": f"{current['name']} is on SALE",
                 "url": current["url"],
@@ -188,11 +235,10 @@ def check_steam(state):
                 "footer": {"text": footer_text}
             }
 
-            content = "Steam Sale"
-
-        elif previous.get("discount_percent", 0) > 0:
+        elif price_back_to_normal:
             original = format_price(current["final"], current["currency"])
 
+            content = "Steam Price Update"
             embed = {
                 "title": f"{current['name']} back to normal price",
                 "url": current["url"],
@@ -201,12 +247,12 @@ def check_steam(state):
                 "thumbnail": {"url": current["image"]}
             }
 
-            content = "Steam Price Update"
-
         if embed:
             send_discord(content or "", embed)
             state["steam"][app_id] = current
             changed = True
+        else:
+            state["steam"][app_id] = current
 
     return changed
 
