@@ -1,8 +1,6 @@
 name: YouTube and Steam to Discord
 
 on:
-  schedule:
-    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -24,13 +22,12 @@ jobs:
       - name: Install dependencies
         run: pip install requests feedparser
 
-      - name: Print schedule debug info
+      - name: Print trigger debug info
         run: |
           echo "UTC time: $(date -u)"
           echo "Local runner time: $(date)"
           echo "Workflow run number: ${{ github.run_number }}"
           echo "Event name: ${{ github.event_name }}"
-          echo "Schedule expression: ${{ github.event.schedule }}"
 
       - name: Run watcher
         env:
