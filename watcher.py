@@ -361,8 +361,8 @@ def main():
 
     if yt_changed or steam_changed:
         save_state(state)
+        queue_final_message()
 
-    queue_final_message()
     flush_queue()
 
 
